@@ -12,23 +12,26 @@ import { ContactSection } from './components/ContactSection';
 import { Footer } from './components/Footer';
 import { AdminPanel } from './components/AdminPanel';
 import { AdminLogin } from './components/AdminLogin';
+import { SuspendedHome } from './components/SuspendedHome';
 import { WhatsAppIcon } from './components/WhatsAppIcon';
-import { MessageCircle } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, ShieldAlert } from 'lucide-react';
 
 export default function App() {
   const [config, setConfig] = useState<SiteConfig>(loadSiteConfig());
-  const [currentView, setCurrentView] = useState<'landing' | 'admin'>('landing');
+  const [currentView, setCurrentView] = useState<'suspended' | 'landing' | 'admin'>('suspended');
   const [isAdminAuthenticated, setIsAdminAuthenticated] = useState<boolean>(() => {
     return sessionStorage.getItem('vazquez_admin_authenticated') === 'true';
   });
 
-  // Check URL hash for direct #admin access (Home is always 'landing' website)
+  // Check URL hash for direct #admin or #preview access
   useEffect(() => {
     const handleHashChange = () => {
       if (window.location.hash === '#admin' || window.location.pathname === '/admin') {
         setCurrentView('admin');
-      } else {
+      } else if (window.location.hash === '#sitio' || window.location.hash === '#preview') {
         setCurrentView('landing');
+      } else {
+        setCurrentView('suspended');
       }
     };
     handleHashChange();
@@ -81,10 +84,16 @@ export default function App() {
   };
 
   const handleCloseAdmin = () => {
-    setCurrentView('landing');
+    setCurrentView('suspended');
     if (window.location.hash === '#admin') {
       window.history.pushState("", document.title, window.location.pathname + window.location.search);
     }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleGoToSuspended = () => {
+    setCurrentView('suspended');
+    window.history.pushState("", document.title, window.location.pathname + window.location.search);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -117,8 +126,39 @@ export default function App() {
     );
   }
 
+  // Suspended Home view (Default)
+  if (currentView === 'suspended') {
+    return (
+      <SuspendedHome
+        config={config}
+        onOpenAdmin={handleOpenAdmin}
+        onPreviewSite={() => {
+          setCurrentView('landing');
+          window.location.hash = 'preview';
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-white text-gray-900 font-sans selection:bg-[#0E5197] selection:text-white flex flex-col">
+      
+      {/* Preview Mode Alert Banner */}
+      <div className="bg-amber-500 text-slate-950 px-4 py-2 text-xs font-bold flex items-center justify-between shadow-sm sticky top-0 z-50">
+        <div className="flex items-center gap-2">
+          <AlertTriangle className="w-4 h-4 text-slate-950 shrink-0" />
+          <span>MODO VISTA PREVIA: El sitio público muestra la pantalla de suspensión por falta de pago.</span>
+        </div>
+        <button
+          onClick={handleGoToSuspended}
+          className="inline-flex items-center gap-1.5 bg-slate-950 text-white hover:bg-slate-800 px-3 py-1 rounded-md text-[11px] font-bold transition-all shrink-0 ml-2"
+        >
+          <ArrowLeft className="w-3 h-3" />
+          <span>Volver al Home Suspendido</span>
+        </button>
+      </div>
+
       {/* 1. Top Bar */}
       <TopBar
         phones={config.topPhones}
