@@ -1,25 +1,12 @@
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import { createServer as createViteServer } from 'vite';
 
 const app = express();
-const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+const PORT = 3000;
 
 app.use(express.json());
-
-// API route: Health check for Hostinger uptime monitoring
-app.get('/api/health', (req, res) => {
-  res.json({
-    status: 'ok',
-    environment: process.env.NODE_ENV || 'production',
-    uptime: process.uptime(),
-    timestamp: new Date().toISOString()
-  });
-});
 
 // API route: Envios.com status check
 app.get('/api/envios/status', (req, res) => {
@@ -48,8 +35,10 @@ app.post('/api/envios/quote', async (req, res) => {
     } = req.body;
 
     const apiKey = customApiKey || process.env.ENVIOS_API_KEY || '9661a48692fa526939383a4598656bb525f82159e7026ebdfc30a3a1700bb7b8';
+    
     let liveApiResponse = null;
 
+    // Attempt live call to Envia.com / Envios.com REST API
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 3000);
@@ -61,15 +50,23 @@ app.post('/api/envios/quote', async (req, res) => {
           'Authorization': `Bearer ${apiKey}`
         },
         body: JSON.stringify({
-          origin: { postalCode: String(originPostalCode), country: 'MX' },
-          destination: { postalCode: String(destinationPostalCode), country: 'MX' },
-          packages: [{
-            content: 'Productos Ropa en Línea',
-            amount: 1,
-            type: 'box',
-            dimensions: dimensions,
-            weight: weight
-          }]
+          origin: {
+            postalCode: String(originPostalCode),
+            country: 'MX'
+          },
+          destination: {
+            postalCode: String(destinationPostalCode),
+            country: 'MX'
+          },
+          packages: [
+            {
+              content: 'Productos Ropa en Línea',
+              amount: 1,
+              type: 'box',
+              dimensions: dimensions,
+              weight: weight
+            }
+          ]
         }),
         signal: controller.signal
       });
@@ -80,7 +77,7 @@ app.post('/api/envios/quote', async (req, res) => {
         const rawData = await response.json();
         if (rawData?.data && Array.isArray(rawData.data)) {
           liveApiResponse = {
-            rates: rawData.data.map((item, idx) => ({
+            rates: rawData.data.map((item: any, idx: number) => ({
               id: `envia-${item.carrier}-${idx}`,
               carrier: item.carrierDescription || item.carrier || 'Paquetería',
               service: item.serviceDescription || item.service || 'Estándar',
@@ -94,10 +91,11 @@ app.post('/api/envios/quote', async (req, res) => {
         }
       }
     } catch (_err) {
-      // Fallback
+      // Remote API call bypassed or timed out, will fall back to Envios.com engine below
     }
 
-    const destCpNum = parseInt(String(destinationPostalCode).replace(/\D/g, '') || '1000', 10);
+    // Dynamic cost multiplier based on destination postal code region
+    const destCpNum = parseInt(destinationPostalCode.replace(/\D/g, '') || '1000', 10);
     const distanceModifier = Math.floor((destCpNum % 50) / 10) * 12;
 
     const enviosCarriers = [
@@ -174,7 +172,7 @@ app.post('/api/envios/quote', async (req, res) => {
       liveApiUsed: Boolean(liveApiResponse),
       rates: liveApiResponse?.rates || enviosCarriers
     });
-  } catch (error) {
+  } catch (error: any) {
     res.status(500).json({
       success: false,
       error: error.message || 'Error al cotizar con Envios.com'
@@ -182,40 +180,30 @@ app.post('/api/envios/quote', async (req, res) => {
   }
 });
 
-// Locate static assets in dist or current directory
-const cwdDistPath = path.join(process.cwd(), 'dist');
-const dirnameDistPath = path.join(__dirname, 'dist');
-let staticDir = cwdDistPath;
+// API route: health check
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', uptime: process.uptime() });
+});
 
-if (fs.existsSync(path.join(cwdDistPath, 'index.html'))) {
-  staticDir = cwdDistPath;
-} else if (fs.existsSync(path.join(dirnameDistPath, 'index.html'))) {
-  staticDir = dirnameDistPath;
-} else if (fs.existsSync(path.join(__dirname, 'index.html'))) {
-  staticDir = __dirname;
+async function startServer() {
+  // Vite middleware for development
+  if (process.env.NODE_ENV !== 'production') {
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: 'spa'
+    });
+    app.use(vite.middlewares);
+  } else {
+    const distPath = path.join(process.cwd(), 'dist');
+    app.use(express.static(distPath));
+    app.get('*', (req, res) => {
+      res.sendFile(path.join(distPath, 'index.html'));
+    });
+  }
+
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+  });
 }
 
-console.log(`[Hostinger Server] Sirviendo archivos estáticos desde: ${staticDir}`);
-app.use(express.static(staticDir));
-
-app.get('*', (req, res) => {
-  const indexPath = path.join(staticDir, 'index.html');
-  if (fs.existsSync(indexPath)) {
-    res.sendFile(indexPath);
-  } else {
-    res.status(200).send(`
-      <!DOCTYPE html>
-      <html>
-        <head><title>Armario Virtual</title></head>
-        <body style="font-family: sans-serif; text-align: center; padding: 50px;">
-          <h2>Servidor en ejecución</h2>
-          <p>Compilando archivos estáticos... por favor recarga en unos segundos.</p>
-        </body>
-      </html>
-    `);
-  }
-});
-
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`[Hostinger Server] Aplicación escuchando en el puerto ${PORT}`);
-});
+startServer();
